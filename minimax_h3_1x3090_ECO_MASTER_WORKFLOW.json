@@ -1,0 +1,261 @@
+{
+  "schema_version": "1.0",
+  "name": "MiniMax H3 1x RTX 3090 ECO MASTER WORKFLOW",
+  "kind": "persistent_single_gpu_power_efficiency_profile",
+  "goal": "Minimum practical energy use and heat on one RTX 3090 while preserving the chosen render-quality settings. Power tuning may reduce speed, but should not intentionally change model quality settings.",
+  "target_hardware": {
+    "gpu": [
+      {
+        "id": 0,
+        "model": "RTX 3090",
+        "vram_gb": 24
+      }
+    ],
+    "system_ram_gb_recommended": 64,
+    "system_ram_gb_ideal": 128,
+    "platform": "Linux preferred; Windows supported with equivalent power-limit/undervolt tooling"
+  },
+  "important_distinction": {
+    "quality_neutral_controls": [
+      "GPU power limit",
+      "stable undervolt / clock-voltage tuning",
+      "fan curve / thermal management",
+      "keeping the same model, seed, resolution, sampler, scheduler, steps and CFG"
+    ],
+    "quality_changing_or_potentially_quality_changing_controls": [
+      "lowering resolution",
+      "reducing steps",
+      "Turbo / Lightning / acceleration LoRAs",
+      "approximate caches",
+      "attention replacements such as Sage/Spectrum",
+      "changing diffusion-model quantization",
+      "changing text-encoder quantization"
+    ],
+    "policy": "Strict-quality profiles never enable quality-changing controls automatically."
+  },
+  "single_gpu_architecture": {
+    "multi_gpu": false,
+    "sequence_parallel": false,
+    "world_size": 1,
+    "loader_policy": "Use the normal/native single-GPU H3 loader/workflow, not MiniMaxH3SPUNETLoader.",
+    "vae_decode": "stock VAEDecode",
+    "reason": "No SP overhead and no extra SP VAE memory duplication on a single 24GB card."
+  },
+  "launch": {
+    "default": "python3 main.py --listen 0.0.0.0 --port 8188",
+    "memory_safe_32gb_ram_variant": "python3 main.py --listen 0.0.0.0 --port 8188 --disable-pinned-memory --fp16-intermediates",
+    "allocator_optional": "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
+    "do_not_use_by_default": [
+      "--lowvram",
+      "--novram",
+      "--highvram",
+      "--disable-smart-memory"
+    ],
+    "notes": [
+      "With 128GB system RAM, do not add memory workarounds unless measurements show a real problem.",
+      "--disable-pinned-memory can dramatically reduce host-RAM pressure on RAM-constrained single-3090 systems, but can reduce transfer performance; benchmark it on the actual machine.",
+      "--fp16-intermediates is a memory-saving option, not part of the strict reference-quality baseline."
+    ]
+  },
+  "power_policy": {
+    "reference_stock_w": 350,
+    "default_eco_w": 250,
+    "balanced_eco_w": 280,
+    "maximum_efficiency_search_w": [
+      300,
+      280,
+      260,
+      250,
+      230
+    ],
+    "linux_commands": {
+      "set_300w": "sudo nvidia-smi -i 0 -pl 300",
+      "set_280w": "sudo nvidia-smi -i 0 -pl 280",
+      "set_260w": "sudo nvidia-smi -i 0 -pl 260",
+      "set_250w": "sudo nvidia-smi -i 0 -pl 250",
+      "set_230w": "sudo nvidia-smi -i 0 -pl 230",
+      "restore_example": "sudo nvidia-smi -i 0 -pl 350"
+    },
+    "selection_rule": "Choose the power limit that minimizes measured Wh per completed render while staying inside the user's acceptable render-time penalty and passing the same-seed visual comparison.",
+    "quality_note": "A power limit changes clock/power behavior, not the configured diffusion trajectory. It should not intentionally alter quality, but unstable undervolts/thermal errors are invalid and must be rejected.",
+    "do_not_chase_lowest_watts": true
+  },
+  "energy_benchmark_protocol": {
+    "fixed_inputs": [
+      "same prompt",
+      "same seed",
+      "same input/reference image",
+      "same resolution",
+      "same duration",
+      "same model files",
+      "same sampler",
+      "same scheduler",
+      "same steps",
+      "same CFG",
+      "same ComfyUI workflow"
+    ],
+    "test_power_limits_w": [
+      300,
+      280,
+      260,
+      250,
+      230
+    ],
+    "warmup_runs": 1,
+    "measured_runs_each": 2,
+    "measure": [
+      "render_seconds",
+      "average_gpu_power_w",
+      "peak_gpu_power_w",
+      "Wh_per_render",
+      "peak_vram_mb",
+      "peak_system_ram_mb",
+      "GPU temperature",
+      "visual hash / same-seed comparison where practical"
+    ],
+    "formula": "Wh_per_render = average_gpu_power_w * render_seconds / 3600",
+    "winner": "Lowest Wh_per_render that remains stable and within acceptable runtime."
+  },
+  "profiles": {
+    "01_ECO_STRICT_QUALITY": {
+      "purpose": "Reduce heat and electricity without intentionally changing render-quality settings.",
+      "gpu_power_limit_w": 250,
+      "model_policy": "Keep the exact same diffusion model and text encoder used by the user's reference-quality workflow.",
+      "resolution": "same as reference",
+      "steps": "same as reference",
+      "sampler": "same as reference",
+      "scheduler": "same as reference",
+      "cfg": "same as reference",
+      "turbo": false,
+      "approximate_cache": false,
+      "attention_replacement": false,
+      "notes": [
+        "This is the safest power-saving profile.",
+        "If 250W costs too much time, use 260W or 280W; quality settings remain unchanged."
+      ]
+    },
+    "02_ECO_BALANCED_280W": {
+      "purpose": "Keep most stock throughput while cutting heat and power substantially.",
+      "gpu_power_limit_w": 280,
+      "quality_settings": "identical to reference production workflow",
+      "turbo": false,
+      "approximate_cache": false,
+      "attention_replacement": false
+    },
+    "03_SINGLE_3090_PRODUCTION": {
+      "purpose": "Recommended single-GPU final render baseline.",
+      "gpu_power_limit_w": "use calibrated winner, default 250-280W",
+      "resolution": "1280x736 when practical; use the exact project's chosen reference resolution",
+      "steps": 30,
+      "step_range": [
+        24,
+        36
+      ],
+      "sampler": "er_sde or sa_solver",
+      "scheduler": "beta",
+      "cfg": 1.0,
+      "turbo": false,
+      "cache": false,
+      "attention_extra_patch": "OFF in strict baseline"
+    },
+    "04_SINGLE_3090_MAX_QUALITY": {
+      "purpose": "Maximum-quality final render with lower GPU power draw.",
+      "gpu_power_limit_w": "calibrated 250-280W",
+      "resolution": "1280x736; 1344x768 only if stable",
+      "steps": 40,
+      "step_range": [
+        35,
+        50
+      ],
+      "sampler": "er_sde",
+      "scheduler": "beta",
+      "cfg": 1.0,
+      "turbo": false,
+      "cache": false,
+      "attention_extra_patch": "OFF"
+    },
+    "05_OPTIONAL_NATIVE_AMPERE_SPEED_TEST": {
+      "purpose": "Optional A/B test for lower total energy through faster Ampere-native quantized execution.",
+      "strict_quality_equivalent": false,
+      "candidate_diffusion_model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "candidate_text_encoder": "Ampere-native INT8/ConvRot encoder if available for the exact workflow",
+      "policy": "Do not promote to default without same-seed A/B quality review and Wh/render benchmark.",
+      "reason": "Current community reports show native INT8/ConvRot can be materially faster than emulated FP8/NVFP4 paths on RTX 3090, but changing quantization can change outputs."
+    },
+    "06_OPTIONAL_SAGE_TEST": {
+      "purpose": "Optional speed/energy experiment only.",
+      "strict_quality_equivalent": false,
+      "enabled_by_default": false,
+      "policy": "A/B against clean baseline. Reject if seed reproducibility, motion, detail or prompt adherence changes materially.",
+      "reason": "Single-3090 reports are mixed: some show large speedups, others show negligible benefit. Treat as workload/version-specific."
+    }
+  },
+  "memory_policy": {
+    "128gb_ram_machine": {
+      "default": "Use normal ComfyUI memory management first.",
+      "disable_pinned_memory": "Only after measured host-RAM/pinned-memory growth or OOM symptoms.",
+      "fp16_intermediates": "Optional memory-saving mode; benchmark before making it persistent.",
+      "swap": "Safety net only; not a performance feature."
+    },
+    "32gb_ram_machine": {
+      "recommended_launch_flags": [
+        "--disable-pinned-memory",
+        "--fp16-intermediates"
+      ],
+      "reason": "Verified community setups show host-RAM pinning can be the actual bottleneck on single 3090."
+    },
+    "disk_cache": false
+  },
+  "thermals": {
+    "policy": "Prefer lower power limit and stable cooling over overclocking.",
+    "targets": {
+      "gpu_core": "keep comfortably below thermal throttle",
+      "memory_junction": "monitor on 3090; avoid sustained thermal-throttle territory"
+    },
+    "overclock": false,
+    "undervolt": {
+      "allowed": true,
+      "default": false,
+      "rule": "Only use a previously stability-tested voltage/frequency curve. A crash, artifact or CUDA error invalidates the undervolt."
+    }
+  },
+  "quality_guardrails": [
+    "Power saving must not be achieved by lowering resolution in strict-quality mode.",
+    "Power saving must not be achieved by lowering steps in strict-quality mode.",
+    "Turbo remains OFF for strict final-quality profiles.",
+    "Approximate caches remain OFF for strict final-quality profiles.",
+    "Attention replacements remain OFF until separately A/B validated.",
+    "Keep a fixed-seed clean reference clip for every persistent optimization decision."
+  ],
+  "recommended_daily_choice": {
+    "profile": "01_ECO_STRICT_QUALITY",
+    "starting_power_limit_w": 250,
+    "fallback_if_too_slow_w": 280,
+    "reason": "Power limiting is the clearest quality-neutral lever. It reduces heat and instantaneous draw without changing the configured model/steps/resolution."
+  },
+  "recommended_calibration": {
+    "first": "Run a fixed-seed 300/280/260/250/230W sweep.",
+    "choose_by": "Wh/render, stability, and acceptable render-time penalty.",
+    "then": "Keep that power limit as machine default.",
+    "do_not": "Assume the lowest wattage is the cheapest render."
+  },
+  "do_not_do": [
+    "Do not use the 2-GPU Ulysses/SP loader on a 1-GPU profile.",
+    "Do not treat a lower power limit as a reason to lower quality settings.",
+    "Do not stack Turbo, caches and attention replacements in the strict-quality lane.",
+    "Do not assume NVFP4/FP8 paths are fastest on Ampere; benchmark native INT8/ConvRot separately.",
+    "Do not change quantization and claim identical output without A/B validation.",
+    "Do not use unstable undervolts.",
+    "Do not judge energy efficiency from watts alone; measure Wh per render."
+  ],
+  "source_profile_relation": {
+    "based_on": "minimax_h3_2x3090_MASTER_WORKFLOW.json",
+    "main_changes": [
+      "Removed Ulysses sequence parallel and all 2-GPU loader assumptions.",
+      "Added explicit GPU power-limit calibration.",
+      "Added Wh-per-render efficiency selection.",
+      "Separated strict quality-neutral tuning from optional quantization/attention experiments.",
+      "Adjusted memory policy for single-GPU operation."
+    ]
+  }
+}
